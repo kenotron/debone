@@ -1,0 +1,20 @@
+{
+  "name": "debone",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/yargs-parser": "^20.2.1",
+    "@types/node": "^16.9.2",
+    "ts-node": "^10.2.1",
+    "typescript": "^4.4.3"
+  },
+  "dependencies": {
+    "workspace-tools": "^0.16.2",
+    "yargs-parser": "^20.2.9",
+    "execa": "^5.1.1"
+  },
+  "scripts": {
+    "go": "ts-node src/index.ts"
+  }
+}
