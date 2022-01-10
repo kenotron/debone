@@ -1,63 +1,75 @@
 import { getPackageInfos, git } from "workspace-tools";
-import yargsParser from "yargs-parser";
 import fs from "fs/promises";
+import { existsSync } from "fs";
 import path from "path";
 import os from "os";
 import execa from "execa";
+import { parseArgs } from "./parseArgs";
+import degit from "degit";
+import { globby } from "globby";
+import pLimit from "p-limit";
 
-async function run() {
-  const tmpDir = "/tmp/fluentui-YTQKVl";
+async function run(args: any) {
+  const repo = args._[0];
+  const outdir =
+    args._.length > 1
+      ? args._[1]
+      : path.join(process.cwd(), `${path.basename(repo)}-deboned`);
 
-  /*
-await fs.mkdtemp(path.join(os.tmpdir(), "fluentui-"));
-  const gitResult = execa(
-    "git",
-    ["clone", "--depth=1", "https://github.com/microsoft/fluentui.git", tmpDir],
-    { stdio: "inherit" }
-  );
+  // degit the repo
+  await degit(repo, {
+    cache: true,
+    force: true,
+    verbose: true,
+  }).clone(outdir);
 
-  // inject fake scripts
-  await fs.mkdir(path.join(tmpDir, ".debone"));
+  // debone
+  const filesInRepo = await globby("**", {
+    ignore: ["package.json", "**/package.json"],
+    cwd: outdir,
+  });
 
-  await fs.copyFile(
-    path.join(__dirname, "../fake", "build.js"),
-    path.join(tmpDir, ".debone", "build.js")
-  );
-*/
-  console.log(tmpDir);
+  const limit = pLimit(15);
+  await Promise.all(filesInRepo.map((f) => limit(() => fs.unlink(f))));
 
-  const packageInfos = getPackageInfos(tmpDir);
+  // const packageInfos = getPackageInfos(tmpDir);
 
-  for (const [pkg, info] of Object.entries(packageInfos)) {
-    const packageJson = JSON.parse(
-      await fs.readFile(info.packageJsonPath, "utf-8")
-    );
+  // for (const [pkg, info] of Object.entries(packageInfos)) {
+  //   const packageJson = JSON.parse(
+  //     await fs.readFile(info.packageJsonPath, "utf-8")
+  //   );
 
-    if (packageJson.scripts) {
-      for (const [script, action] of Object.entries(packageJson.scripts)) {
-        packageJson.scripts[script] = `node "${path.join(
-          tmpDir,
-          ".debone/build.js"
-        )}"`;
-      }
+  //   if (packageJson.scripts) {
+  //     for (const [script, action] of Object.entries(packageJson.scripts)) {
+  //       packageJson.scripts[script] = `node "${path.join(
+  //         tmpDir,
+  //         ".debone/build.js"
+  //       )}"`;
+  //     }
 
-      await fs.writeFile(
-        info.packageJsonPath,
-        JSON.stringify(packageJson, null, 2)
-      );
-    }
-  }
+  //     await fs.writeFile(
+  //       info.packageJsonPath,
+  //       JSON.stringify(packageJson, null, 2)
+  //     );
+  //   }
+  // }
 
-  // const lageInstallResults = await execa("yarn", ["add", "-W", "-D", "lage"], {
+  // // const lageInstallResults = await execa("yarn", ["add", "-W", "-D", "lage"], {
+  // //   cwd: tmpDir,
+  // //   stdio: "inherit",
+  // // });
+
+  // const buildResult = await execa("npx", ["-y", "lage", "lage", "build"], {
   //   cwd: tmpDir,
   //   stdio: "inherit",
   // });
-
-
-  const buildResult = await execa("npx", ["-y", "lage", "lage", "build"], {
-    cwd: tmpDir,
-    stdio: "inherit",
-  });
 }
 
-run();
+const args = parseArgs(process.argv.slice(2));
+
+if (args._.length < 1) {
+  console.error("usage: debone [options] URL [outdir]");
+  process.exit(0);
+}
+
+run(args);
