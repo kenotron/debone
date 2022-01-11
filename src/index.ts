@@ -7,7 +7,11 @@ import gitUrlParse from "git-url-parse";
 import os from "os";
 import { statSync, existsSync, createWriteStream, createReadStream } from "fs";
 import tar from "tar-fs";
-import humanId from "human-id";
+import { humanId } from "human-id";
+import { pipeline } from "stream";
+import { promisify } from "util";
+
+const pipelineAsync = promisify(pipeline);
 
 const CacheDirPrefix = path.join(os.homedir(), ".debone", "git");
 
@@ -50,8 +54,8 @@ async function run(args: any) {
       });
       await fs.rm(path.join(cacheTmp, ".git"), { recursive: true });
 
-      tar
-        .pack(cacheTmp, {
+      await pipelineAsync(
+        tar.pack(cacheTmp, {
           ignore(name) {
             const importantFiles = [
               "package.json",
@@ -71,14 +75,18 @@ async function run(args: any) {
               )
             );
           },
-        })
-        .pipe(createWriteStream(path.join(cacheDir, "repo.tar")));
+        }),
+        createWriteStream(path.join(cacheDir, "repo.tar"))
+      );
 
       await fs.rm(cacheTmp, { recursive: true });
     }
 
     // Even for uncached case, we are using tar to copy just the package.json files
-    createReadStream(path.join(cacheDir, "repo.tar")).pipe(tar.extract(outDir));
+    await pipelineAsync(
+      createReadStream(path.join(cacheDir, "repo.tar")),
+      tar.extract(outDir)
+    );
   } catch (e) {
     console.error(e);
   }
@@ -89,7 +97,13 @@ async function run(args: any) {
   // create package name mapping
   const packageIdMap = new Map<string, string>();
   for (const [pkg, info] of Object.entries(packageInfos)) {
-    packageIdMap.set(pkg, humanId());
+    packageIdMap.set(
+      pkg,
+      humanId({
+        capitalize: false,
+        separator: "-",
+      })
+    );
   }
 
   for (const [pkg, info] of Object.entries(packageInfos)) {
@@ -106,7 +120,7 @@ async function run(args: any) {
       "peerDependencies",
     ]) {
       if (packageJson[depType]) {
-        for (const [dep, range] of packageJson[depType]) {
+        for (const [dep, range] of Object.entries(packageJson[depType])) {
           if (packageIdMap.has(dep)) {
             delete packageJson[depType][dep];
             packageJson[depType][packageIdMap.get(dep)!] = range;
