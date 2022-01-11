@@ -53,14 +53,22 @@ async function run(args: any) {
       tar
         .pack(cacheTmp, {
           ignore(name) {
+            const importantFiles = [
+              "package.json",
+              "package-lock.json",
+              "yarn.lock",
+              "rush.json",
+            ];
+
+            const importantPaths = ["common/config/rush"];
+
             const stat = statSync(name);
             return (
               stat.isFile() &&
-              !name.endsWith("package.json") &&
-              !name.endsWith("package-lock.json") &&
-              !name.endsWith("yarn.lock") &&
-              !name.endsWith("rush.json") &&
-              !name.includes("common/config/rush")
+              !(
+                importantFiles.some((f) => name.endsWith(f)) ||
+                importantPaths.some((p) => name.includes(p))
+              )
             );
           },
         })
