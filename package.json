@@ -1,10 +1,13 @@
 {
   "name": "debone",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
   "type": "module",
   "exports": "./lib/index.js",
   "main": "./lib/index.js",
+  "bin": {
+    "debone": "./bin/debone.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc -w"
