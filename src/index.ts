@@ -1,68 +1,120 @@
 import { getPackageInfos, git } from "workspace-tools";
 import fs from "fs/promises";
-import { existsSync } from "fs";
 import path from "path";
-import os from "os";
+import { parseArgs } from "./parseArgs.js";
 import execa from "execa";
-import { parseArgs } from "./parseArgs";
-import degit from "degit";
-import { globby } from "globby";
-import pLimit from "p-limit";
+import gitUrlParse from "git-url-parse";
+import os from "os";
+import { statSync, existsSync, createWriteStream, createReadStream } from "fs";
+import tar from "tar-fs";
+import humanId from "human-id";
+
+const CacheDirPrefix = path.join(os.homedir(), ".debone", "git");
 
 async function run(args: any) {
   const repo = args._[0];
-  const outdir =
+  const repoUri = gitUrlParse(repo);
+  const cacheDir = path.join(
+    CacheDirPrefix,
+    repoUri.source,
+    repoUri.owner,
+    repoUri.name
+  );
+
+  if (args.clearCache && existsSync(cacheDir)) {
+    await fs.rm(cacheDir, { recursive: true });
+  }
+
+  const outDir =
     args._.length > 1
       ? args._[1]
-      : path.join(process.cwd(), `${path.basename(repo)}-deboned`);
+      : path.join(process.cwd(), `${path.basename(repoUri.name)}-deboned`);
 
   // degit the repo
-  await degit(repo, {
-    cache: true,
-    force: true,
-    verbose: true,
-  }).clone(outdir);
+  try {
+    if (existsSync(outDir)) {
+      await fs.rm(path.join(outDir), { recursive: true });
+    }
+
+    if (!existsSync(cacheDir)) {
+      await fs.mkdir(cacheDir, { recursive: true });
+    }
+
+    if (!existsSync(path.join(cacheDir, "repo.tar"))) {
+      const cacheTmp = path.join(cacheDir, "tmp");
+      // TODO: For github / gitlab / bitbucket / ADO repos, there are well-known URLs / APIs to download tarballs directly.
+      //       It may NOT be better than straight up cloning, however.
+
+      await execa("git", ["clone", "--depth=1", repoUri.toString(), cacheTmp], {
+        stdio: "inherit",
+      });
+      await fs.rm(path.join(cacheTmp, ".git"), { recursive: true });
+
+      tar
+        .pack(cacheTmp, {
+          ignore(name) {
+            const stat = statSync(name);
+            return stat.isFile() && !name.endsWith("package.json");
+          },
+        })
+        .pipe(createWriteStream(path.join(cacheDir, "repo.tar")));
+
+      await fs.rm(cacheTmp, { recursive: true });
+    }
+
+    // Even for uncached case, we are using tar to copy just the package.json files
+    createReadStream(path.join(cacheDir, "repo.tar")).pipe(tar.extract(outDir));
+  } catch (e) {
+    console.error(e);
+  }
 
   // debone
-  const filesInRepo = await globby("**", {
-    ignore: ["package.json", "**/package.json"],
-    cwd: outdir,
-  });
+  const packageInfos = getPackageInfos(outDir);
 
-  const limit = pLimit(15);
-  await Promise.all(filesInRepo.map((f) => limit(() => fs.unlink(f))));
+  // create package name mapping
+  const packageIdMap = new Map<string, string>();
+  for (const [pkg, info] of Object.entries(packageInfos)) {
+    packageIdMap.set(pkg, humanId());
+  }
 
-  // const packageInfos = getPackageInfos(tmpDir);
+  for (const [pkg, info] of Object.entries(packageInfos)) {
+    const packageJson = JSON.parse(
+      await fs.readFile(info.packageJsonPath, "utf-8")
+    );
 
-  // for (const [pkg, info] of Object.entries(packageInfos)) {
-  //   const packageJson = JSON.parse(
-  //     await fs.readFile(info.packageJsonPath, "utf-8")
-  //   );
+    // Fix the package names
+    packageJson.name = packageIdMap.get(pkg);
 
-  //   if (packageJson.scripts) {
-  //     for (const [script, action] of Object.entries(packageJson.scripts)) {
-  //       packageJson.scripts[script] = `node "${path.join(
-  //         tmpDir,
-  //         ".debone/build.js"
-  //       )}"`;
-  //     }
+    for (const depType of [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+    ]) {
+      if (packageJson[depType]) {
+        for (const [dep, range] of packageJson[depType]) {
+          if (packageIdMap.has(dep)) {
+            delete packageJson[depType][dep];
+            packageJson[depType][packageIdMap.get(dep)!] = range;
+          }
+        }
+      }
+    }
 
-  //     await fs.writeFile(
-  //       info.packageJsonPath,
-  //       JSON.stringify(packageJson, null, 2)
-  //     );
-  //   }
-  // }
+    // Fix the scripts
+    if (packageJson.scripts) {
+      for (const [script, action] of Object.entries(packageJson.scripts)) {
+        packageJson.scripts[script] = `node "${path.join(
+          outDir,
+          ".debone/build.js"
+        )}"`;
+      }
+    }
 
-  // // const lageInstallResults = await execa("yarn", ["add", "-W", "-D", "lage"], {
-  // //   cwd: tmpDir,
-  // //   stdio: "inherit",
-  // // });
-
-  // const buildResult = await execa("npx", ["-y", "lage", "lage", "build"], {
-  //   cwd: tmpDir,
-  //   stdio: "inherit",
-  // });
+    await fs.writeFile(
+      info.packageJsonPath,
+      JSON.stringify(packageJson, null, 2)
+    );
+  }
 }
 
 const args = parseArgs(process.argv.slice(2));
