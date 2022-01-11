@@ -54,7 +54,14 @@ async function run(args: any) {
         .pack(cacheTmp, {
           ignore(name) {
             const stat = statSync(name);
-            return stat.isFile() && !name.endsWith("package.json");
+            return (
+              stat.isFile() &&
+              !name.endsWith("package.json") &&
+              !name.endsWith("package-lock.json") &&
+              !name.endsWith("yarn.lock") &&
+              !name.endsWith("rush.json") &&
+              !name.includes("common/config/rush")
+            );
           },
         })
         .pipe(createWriteStream(path.join(cacheDir, "repo.tar")));
