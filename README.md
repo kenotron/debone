@@ -15,6 +15,20 @@ Deboned monorepo features:
 1. package dependency structures
 2. known "fake" build scripts
 
+## Installation / Running
+
+Recommended way to use this is via `npx`:
+
+```
+npx debone URL [outdir]
+```
+
+Example:
+
+```
+npx debone https://github.com/vsavkin/large-monorepo/
+```
+
 ## Roadmap
 
 * detect whether a package is a library or an application
